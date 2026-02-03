@@ -1,8 +1,7 @@
 {
   "name": "strictkit",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "The Security & Architecture Baseline for Next.js",
-  "main": "index.js",
   "bin": {
     "strictkit": "./index.js"
   },
@@ -23,12 +22,16 @@
   ],
   "author": "StrictKit Engineering",
   "license": "MIT",
+  "homepage": "https://strictkit.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/strictkit/strictkit" 
+  },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "chalk": "^4.1.2",
-    "fs-extra": "^10.1.0",
     "glob": "^8.0.3"
   }
 }
