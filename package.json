@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "description": "The Security & Architecture Baseline for Next.js",
   "bin": {
-    "strictkit": "./index.js"
+    "strictkit": "index.js"
   },
   "files": [
     "index.js"
@@ -25,7 +25,7 @@
   "homepage": "https://strictkit.dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/strictkit/strictkit.git"
+    "url": "git+https://github.com/strictkit/strictkit.git"
   },
   "bugs": {
     "url": "https://github.com/strictkit/strictkit/issues"
