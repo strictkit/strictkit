@@ -1,0 +1,34 @@
+{
+  "name": "strictkit",
+  "version": "1.0.0",
+  "description": "The Security & Architecture Baseline for Next.js",
+  "main": "index.js",
+  "bin": {
+    "strictkit": "./index.js"
+  },
+  "files": [
+    "index.js"
+  ],
+  "scripts": {
+    "test": "node index.js .",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "nextjs",
+    "security",
+    "audit",
+    "architecture",
+    "devops",
+    "cli"
+  ],
+  "author": "StrictKit Engineering",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "fs-extra": "^10.1.0",
+    "glob": "^8.0.3"
+  }
+}
