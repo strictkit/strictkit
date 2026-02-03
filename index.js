@@ -4,91 +4,111 @@ const glob = require('glob');
 const fs = require('fs');
 const path = require('path');
 
-// Iniciamos métricas
 const startTime = process.hrtime();
-let rulesEvaluated = 0; // Contador dinámico honesto
+const args = process.argv.slice(2);
 
-const projectPath = process.argv[2] || '.';
-const getFilePath = (relPath) => path.join(projectPath, relPath);
-const label = (text) => chalk.bold(text.padEnd(11));
+// 1. GESTIÓN DE COMANDOS Y FLAGS
+const isJson = args.includes('--json');
+const command = args[0] && !args[0].startsWith('-') ? args[0] : 'audit';
+const projectPath = args.find(a => !a.startsWith('-') && a !== command) || '.';
 
-console.log(chalk.blue('\n🔍 Scanning project architecture...'));
-console.log(chalk.gray(`📂 Target: ${path.resolve(projectPath)}`));
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+// 2. DOCTRINA (LA FILOSOFÍA DETRÁS DEL CÓDIGO)
+const DOCTRINE = {
+  'INTEGRITY': {
+    id: 'SK-INT-001',
+    severity: 'FAIL',
+    philosophy: 'The "any" type is a silent virus. It disables the compiler and hides technical debt.',
+    fix: 'Use unknown, interfaces, or generics to maintain type safety.'
+  },
+  'SECURITY': {
+    id: 'SK-SEC-001',
+    severity: 'WARN',
+    philosophy: 'Hardcoded secrets are a liability. Environment variables are the only standard.',
+    fix: 'Move secrets to .env and ensure .env is in .gitignore.'
+  },
+  'INFRA': {
+    id: 'SK-INF-001',
+    severity: 'FAIL',
+    philosophy: 'Unpinned Docker images create non-deterministic builds.',
+    fix: 'Use specific tags (e.g., node:20-alpine) instead of :latest.'
+  }
+};
 
-let violations = 0;
+// 3. COMANDO: EXPLAIN
+if (command === 'explain') {
+  const rule = args[1]?.toUpperCase();
+  if (rule && DOCTRINE[rule]) {
+    const doc = DOCTRINE[rule];
+    console.log(chalk.blue(`\n📖 StrictKit Doctrine: ${rule} [${doc.id}]`));
+    console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+    console.log(`${chalk.bold('Severity:')}    ${doc.severity === 'FAIL' ? chalk.red(doc.severity) : chalk.yellow(doc.severity)}`);
+    console.log(`${chalk.bold('Philosophy:')}  ${doc.philosophy}`);
+    console.log(`${chalk.bold('Action:')}      ${doc.fix}\n`);
+  } else {
+    console.log(chalk.yellow('\nUsage: npx strictkit explain [INTEGRITY|SECURITY|INFRA]'));
+  }
+  process.exit(0);
+}
 
-// 1. CHECK: Explicit 'any'
-rulesEvaluated++;
+// 4. COMANDO: AUDIT
+const auditResults = [];
+const addResult = (rule, status, message) => {
+  auditResults.push({ id: DOCTRINE[rule]?.id || 'SK-GEN-001', rule, status, message });
+};
+
+// --- RUN CHECKS (Defensivos) ---
+// INTEGRITY
 const tsFiles = glob.sync('**/*.{ts,tsx}', { cwd: projectPath, ignore: 'node_modules/**' });
-const anyRegex = /\b(as\s+any|:\s*any\b|<any>)/g;
 let anyCount = 0;
-
-tsFiles.forEach(file => {
+tsFiles.forEach(f => {
   try {
-    const content = fs.readFileSync(getFilePath(file), 'utf8');
-    const matches = content.match(anyRegex);
+    const content = fs.readFileSync(path.join(projectPath, f), 'utf8');
+    const matches = content.match(/\b(as\s+any|:\s*any\b|<any>)/g);
     if (matches) anyCount += matches.length;
   } catch (e) {}
 });
+if (anyCount > 0) addResult('INTEGRITY', 'FAIL', `${anyCount} explicit 'any' types found.`);
+else addResult('INTEGRITY', 'PASS', 'No explicit any types found.');
 
-if (anyCount > 0) {
-  console.log(`${chalk.red('✖')} ${label('INTEGRITY:')} ${anyCount} explicit 'any' types found. [FAIL]`);
-  violations++;
-} else {
-  console.log(`${chalk.green('✔')} ${label('INTEGRITY:')} No explicit 'any' types found.`);
-}
-
-// 2. CHECK: Secrets
-rulesEvaluated++;
+// SECURITY
 const allFiles = glob.sync('**/*.{ts,tsx,js,jsx,json}', { cwd: projectPath, ignore: ['node_modules/**', '.env*', 'package-lock.json'] });
-const secretRegex = /sk_live_[a-zA-Z0-9]+|AIza[a-zA-Z0-9\\-_]+|(?:"|')?api_key(?:"|')?\s*:\s*(?:"|')[a-zA-Z0-9\\-_]{10,}(?:"|')/i;
-let secretsFound = [];
-
-allFiles.forEach(file => {
+let secretFiles = [];
+allFiles.forEach(f => {
   try {
-    const content = fs.readFileSync(getFilePath(file), 'utf8');
-    if (secretRegex.test(content)) secretsFound.push(file);
+    const content = fs.readFileSync(path.join(projectPath, f), 'utf8');
+    if (/sk_live_[a-zA-Z0-9]+|AIza[a-zA-Z0-9\\-_]+|(?:"|')?api_key(?:"|')?\s*:\s*(?:"|')[a-zA-Z0-9\\-_]{10,}(?:"|')/i.test(content)) {
+      secretFiles.push(f);
+    }
   } catch (e) {}
 });
+if (secretFiles.length > 0) addResult('SECURITY', 'WARN', `Secrets detected in ${secretFiles[0]}${secretFiles.length > 1 ? ' (and others)' : ''}`);
+else addResult('SECURITY', 'PASS', 'No obvious secret patterns detected.');
 
-if (secretsFound.length > 0) {
-  const extraCount = secretsFound.length > 1 ? ` (+${secretsFound.length - 1} others)` : '';
-  console.log(`${chalk.yellow('⚠')} ${label('SECURITY:')} Hardcoded credential pattern in ${secretsFound[0]}${extraCount} [WARN]`);
-  violations++; // Mantenemos la Opción A: Warning = Violación de baseline
+// --- FINAL REPORT ---
+const [s, ns] = process.hrtime(startTime);
+const durationMs = parseFloat((s * 1e3 + ns / 1e6).toFixed(2));
+const violations = auditResults.filter(r => r.status === 'FAIL' || r.status === 'WARN').length;
+
+if (isJson) {
+  process.stdout.write(JSON.stringify({
+    version: "0.1.2",
+    status: violations > 0 ? "FAILED" : "PASSED",
+    metrics: { violations, rules_evaluated: auditResults.length, duration_ms: durationMs },
+    results: auditResults
+  }, null, 2) + '\n');
 } else {
-  console.log(`${chalk.green('✔')} ${label('SECURITY:')} No obvious secret patterns detected.`);
-}
-
-// 3. CHECK: Docker (Condicional)
-const dockerfilePath = getFilePath('Dockerfile');
-if (fs.existsSync(dockerfilePath)) {
-  rulesEvaluated++; // Solo contamos si existe
-  const dockerContent = fs.readFileSync(dockerfilePath, 'utf8');
-  const fromLines = dockerContent.split('\n').filter(line => line.trim().startsWith('FROM'));
-  const hasLatest = fromLines.some(line => !line.includes(':') || line.includes(':latest'));
-
-  if (hasLatest) {
-    console.log(`${chalk.red('✖')} ${label('INFRA:')} Docker base image is unpinned (implicit or :latest). [FAIL]`);
-    violations++;
+  console.log(chalk.blue('\n🔍 StrictKit Audit Report'));
+  console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+  auditResults.forEach(res => {
+    const color = res.status === 'PASS' ? chalk.green : (res.status === 'WARN' ? chalk.yellow : chalk.red);
+    console.log(`${color(res.status.padEnd(5))} [${res.id}] ${res.rule.padEnd(10)}: ${res.message}`);
+  });
+  console.log(chalk.gray('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+  if (violations > 0) {
+    console.log(chalk.red(`\n✖ Conclusion: Project violates the StrictKit Baseline.`));
+    process.exit(1);
   } else {
-    console.log(`${chalk.green('✔')} ${label('INFRA:')} Docker base image is strictly pinned.`);
+    console.log(chalk.green(`\n✔ Conclusion: Project meets StrictKit standards.`));
+    process.exit(0);
   }
-} 
-// Si no existe, no imprimimos nada ni sumamos al contador. Limpieza total.
-
-// Métricas finales
-const endTime = process.hrtime(startTime);
-const timeInMs = (endTime[0] * 1000 + endTime[1] / 1e6).toFixed(2);
-
-console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-console.log(chalk.gray(`Rules evaluated: ${rulesEvaluated}  |  Audited in ${timeInMs}ms`));
-
-if (violations > 0) {
-  console.log(chalk.red(`\n👉 Conclusion: Your project violates the StrictKit Security Baseline.`));
-  console.log(chalk.gray(`\nNext step:\n→ Fix violations and re-run: npx strictkit audit .`));
-  process.exit(1); 
-} else {
-  console.log(chalk.green(`\n✅ Conclusion: Project meets StrictKit standards.`));
-  process.exit(0);
 }
