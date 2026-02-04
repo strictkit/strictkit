@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const chalk = require('chalk');
-const glob = require('glob');
+const { globSync } = require('glob'); // <--- CAMBIO 1: Destructuring para versión moderna
 const fs = require('fs');
 const path = require('path');
 const { trackAudit } = require('./utils/telemetry'); 
@@ -23,7 +23,7 @@ const DOCTRINE = {
   },
   'SECURITY': {
     id: 'SK-SEC-001',
-    severity: 'WARN', // Cambiar a FAIL si quieres ser muy estricto
+    severity: 'WARN', 
     philosophy: 'Hardcoded secrets are a liability. Environment variables are the only standard.',
     fix: 'Move secrets to .env and ensure .env is in .gitignore.'
   },
@@ -60,8 +60,8 @@ const addResult = (rule, status, message) => {
 // --- RUN CHECKS ---
 
 // [CHECK 1] INTEGRITY (TypeScript Strictness)
-// Mejora: Limpia comentarios para evitar falsos positivos y detecta 'any[]'
-const tsFiles = glob.sync('**/*.{ts,tsx}', { cwd: projectPath, ignore: ['node_modules/**', 'dist/**', 'build/**'] });
+// CAMBIO 2: globSync en lugar de glob.sync
+const tsFiles = globSync('**/*.{ts,tsx}', { cwd: projectPath, ignore: ['node_modules/**', 'dist/**', 'build/**'] });
 let anyCount = 0;
 let anyFiles = 0;
 
@@ -69,12 +69,10 @@ tsFiles.forEach(f => {
   try {
     const content = fs.readFileSync(path.join(projectPath, f), 'utf8');
     
-    // Eliminar comentarios para no detectar " // TODO: remove any"
     const noComments = content
       .replace(/\/\*[\s\S]*?\*\//g, '') 
       .replace(/\/\/.*/g, '');           
     
-    // Patrones extendidos
     const patterns = [
       /\bas\s+any\b/g,           // as any
       /:\s*any\b/g,              // : any
@@ -102,8 +100,8 @@ else addResult('INTEGRITY', 'PASS', 'No explicit any types found.');
 
 
 // [CHECK 2] SECURITY (Secret Scanning)
-// Mejora: Regex mucho más agresivos (AWS, GitHub, OpenAI, Supabase)
-const allFiles = glob.sync('**/*.{ts,tsx,js,jsx,json,env*}', { cwd: projectPath, ignore: ['node_modules/**', 'package-lock.json', '.git/**'] });
+// CAMBIO 3: globSync en lugar de glob.sync
+const allFiles = globSync('**/*.{ts,tsx,js,jsx,json,env*}', { cwd: projectPath, ignore: ['node_modules/**', 'package-lock.json', '.git/**'] });
 const SECRET_PATTERNS = [
   /sk_live_[a-zA-Z0-9]{24,}/,       // Stripe Live
   /AKIA[0-9A-Z]{16}/,               // AWS Access Key
@@ -113,7 +111,7 @@ const SECRET_PATTERNS = [
   /sk-proj-[a-zA-Z0-9]{48}/,        // OpenAI Project
   /sk-[a-zA-Z0-9]{48}/,             // OpenAI Legacy
   /eyJ[a-zA-Z0-9_-]{20,}\.eyJ/,     // JWT / Supabase potential leaks
-  /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/ // Private Keys (SSH/Deploy)
+  /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/ // Private Keys
 ];
 
 let secretFiles = [];
@@ -123,7 +121,7 @@ allFiles.forEach(f => {
     for (const pattern of SECRET_PATTERNS) {
         if (pattern.test(content)) {
             secretFiles.push(f);
-            break; // Ya encontramos uno, pasamos al siguiente archivo
+            break; 
         }
     }
   } catch (e) {}
@@ -134,7 +132,6 @@ else addResult('SECURITY', 'PASS', 'No obvious secret patterns detected.');
 
 
 // [CHECK 3] INFRA (Docker)
-// Mejora: Lógica más robusta para detectar tags débiles
 try {
   const dockerPath = path.join(projectPath, 'Dockerfile');
   if (fs.existsSync(dockerPath)) {
@@ -142,7 +139,7 @@ try {
     
     const hasLatest = /FROM\s+[\w\-./]+:latest/i.test(dockerfile);
     const hasWeakTag = /FROM\s+[\w\-./]+:(?![0-9])/i.test(dockerfile); 
-    const hasAlpineOnly = /FROM\s+[\w\-./]+:alpine\b/i.test(dockerfile); // 🏔️ Alpine sin versión
+    const hasAlpineOnly = /FROM\s+[\w\-./]+:alpine\b/i.test(dockerfile); 
     const hasNoTag = /FROM\s+[\w\-./]+[\s\n]/i.test(dockerfile) && !dockerfile.includes(':');
 
     if (hasLatest || hasWeakTag || hasNoTag || hasAlpineOnly) {
@@ -160,18 +157,12 @@ const durationMs = parseFloat((s * 1e3 + ns / 1e6).toFixed(2));
 const violations = auditResults.filter(r => r.status === 'FAIL' || r.status === 'WARN').length;
 const isFailure = violations > 0;
 
-// 2. DISPARAR TELEMETRÍA (Fire & Forget)
-// Safe wrapper en caso de que utils/telemetry falle
 try {
     const brokenRuleIds = auditResults.filter(r => r.status !== 'PASS').map(r => r.id);
     trackAudit(isFailure ? 'FAIL' : 'PASS', brokenRuleIds);
-} catch (e) {
-    // Telemetría no debe romper el CLI
-}
+} catch (e) {}
 
-// 3. WRAPPER CON TIMEOUT
 setTimeout(() => {
-  // Manejo de versión robusto
   let pkgVersion = "unknown";
   try { pkgVersion = require('./package.json').version; } catch(e) {}
 
