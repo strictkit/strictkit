@@ -3,7 +3,7 @@ const chalk = require('chalk');
 const glob = require('glob');
 const fs = require('fs');
 const path = require('path');
-const { trackAudit } = require('./utils/telemetry'); // <--- 1. IMPORTAR TELEMETRÍA
+const { trackAudit } = require('./utils/telemetry'); 
 
 const startTime = process.hrtime();
 const args = process.argv.slice(2);
@@ -23,7 +23,7 @@ const DOCTRINE = {
   },
   'SECURITY': {
     id: 'SK-SEC-001',
-    severity: 'WARN',
+    severity: 'WARN', // Cambiar a FAIL si quieres ser muy estricto
     philosophy: 'Hardcoded secrets are a liability. Environment variables are the only standard.',
     fix: 'Move secrets to .env and ensure .env is in .gitignore.'
   },
@@ -31,7 +31,7 @@ const DOCTRINE = {
     id: 'SK-INF-001',
     severity: 'FAIL',
     philosophy: 'Unpinned Docker images create non-deterministic builds.',
-    fix: 'Use specific tags (e.g., node:20-alpine) instead of :latest.'
+    fix: 'Use specific tags (e.g., node:20.1-alpine) instead of :latest.'
   }
 };
 
@@ -44,7 +44,7 @@ if (command === 'explain') {
     console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
     console.log(`${chalk.bold('Severity:')}    ${doc.severity === 'FAIL' ? chalk.red(doc.severity) : chalk.yellow(doc.severity)}`);
     console.log(`${chalk.bold('Philosophy:')}  ${doc.philosophy}`);
-    console.log(`${chalk.bold('Action:')}      ${doc.fix}\n`);
+    console.log(`${chalk.bold('Action:')}       ${doc.fix}\n`);
   } else {
     console.log(chalk.yellow('\nUsage: npx strictkit explain [INTEGRITY|SECURITY|INFRA]'));
   }
@@ -58,44 +58,102 @@ const addResult = (rule, status, message) => {
 };
 
 // --- RUN CHECKS ---
-// INTEGRITY
-const tsFiles = glob.sync('**/*.{ts,tsx}', { cwd: projectPath, ignore: 'node_modules/**' });
+
+// [CHECK 1] INTEGRITY (TypeScript Strictness)
+// Mejora: Limpia comentarios para evitar falsos positivos y detecta 'any[]'
+const tsFiles = glob.sync('**/*.{ts,tsx}', { cwd: projectPath, ignore: ['node_modules/**', 'dist/**', 'build/**'] });
 let anyCount = 0;
+let anyFiles = 0;
+
 tsFiles.forEach(f => {
   try {
     const content = fs.readFileSync(path.join(projectPath, f), 'utf8');
-    const matches = content.match(/\b(as\s+any|:\s*any\b|<any>)/g);
-    if (matches) anyCount += matches.length;
+    
+    // Eliminar comentarios para no detectar " // TODO: remove any"
+    const noComments = content
+      .replace(/\/\*[\s\S]*?\*\//g, '') 
+      .replace(/\/\/.*/g, '');           
+    
+    // Patrones extendidos
+    const patterns = [
+      /\bas\s+any\b/g,           // as any
+      /:\s*any\b/g,              // : any
+      /any\[\]/g,                // any[]
+      /<any>/g,                  // Array<any>
+      /\bany\s*,/g,              // any, (in generics)
+      /,\s*any\b/g               // , any (in generics)
+    ];
+    
+    let fileMatches = 0;
+    patterns.forEach(p => {
+        const matches = noComments.match(p);
+        if (matches) fileMatches += matches.length;
+    });
+
+    if (fileMatches > 0) {
+        anyCount += fileMatches;
+        anyFiles++;
+    }
   } catch (e) {}
 });
-if (anyCount > 0) addResult('INTEGRITY', 'FAIL', `${anyCount} explicit 'any' types found.`);
+
+if (anyCount > 0) addResult('INTEGRITY', 'FAIL', `${anyCount} explicit 'any' types found in ${anyFiles} files.`);
 else addResult('INTEGRITY', 'PASS', 'No explicit any types found.');
 
-// SECURITY
-const allFiles = glob.sync('**/*.{ts,tsx,js,jsx,json}', { cwd: projectPath, ignore: ['node_modules/**', '.env*', 'package-lock.json'] });
+
+// [CHECK 2] SECURITY (Secret Scanning)
+// Mejora: Regex mucho más agresivos (AWS, GitHub, OpenAI, Supabase)
+const allFiles = glob.sync('**/*.{ts,tsx,js,jsx,json,env*}', { cwd: projectPath, ignore: ['node_modules/**', 'package-lock.json', '.git/**'] });
+const SECRET_PATTERNS = [
+  /sk_live_[a-zA-Z0-9]{24,}/,       // Stripe Live
+  /AKIA[0-9A-Z]{16}/,               // AWS Access Key
+  /ghp_[a-zA-Z0-9]{36}/,            // GitHub Personal Token
+  /gho_[a-zA-Z0-9]{36}/,            // GitHub OAuth
+  /AIza[a-zA-Z0-9\-_]{35}/,         // Google API
+  /sk-proj-[a-zA-Z0-9]{48}/,        // OpenAI Project
+  /sk-[a-zA-Z0-9]{48}/,             // OpenAI Legacy
+  /eyJ[a-zA-Z0-9_-]{20,}\.eyJ/      // JWT / Supabase potential leaks
+];
+
 let secretFiles = [];
 allFiles.forEach(f => {
   try {
     const content = fs.readFileSync(path.join(projectPath, f), 'utf8');
-    if (/sk_live_[a-zA-Z0-9]+|AIza[a-zA-Z0-9\\-_]+|(?:"|')?api_key(?:"|')?\s*:\s*(?:"|')[a-zA-Z0-9\\-_]{10,}(?:"|')/i.test(content)) {
-      secretFiles.push(f);
+    for (const pattern of SECRET_PATTERNS) {
+        if (pattern.test(content)) {
+            secretFiles.push(f);
+            break; // Ya encontramos uno, pasamos al siguiente archivo
+        }
     }
   } catch (e) {}
 });
-if (secretFiles.length > 0) addResult('SECURITY', 'WARN', `Secrets detected in ${secretFiles[0]}${secretFiles.length > 1 ? ' (and others)' : ''}`);
+
+if (secretFiles.length > 0) addResult('SECURITY', 'WARN', `Potential secrets detected in ${secretFiles.length} files (e.g., ${secretFiles[0]}).`);
 else addResult('SECURITY', 'PASS', 'No obvious secret patterns detected.');
 
-// INFRA (Nota: He añadido la lógica que faltaba para INFRA basándome en tu doctrina)
+
+// [CHECK 3] INFRA (Docker)
+// Mejora: Lógica más robusta para detectar tags débiles
 try {
-  const dockerfile = fs.readFileSync(path.join(projectPath, 'Dockerfile'), 'utf8');
-  if (/FROM\s+[\w\-/]+:latest/i.test(dockerfile) || /FROM\s+node:[\d]+(?![\d\w.-])/i.test(dockerfile)) {
-     addResult('INFRA', 'FAIL', 'Unpinned Docker image detected (using :latest or implicit tag).');
+  const dockerPath = path.join(projectPath, 'Dockerfile');
+  if (fs.existsSync(dockerPath)) {
+    const dockerfile = fs.readFileSync(dockerPath, 'utf8');
+    
+    // Busca FROM imagen:latest O FROM imagen (sin tag) O FROM imagen:tag_sin_numero
+    const hasLatest = /FROM\s+[\w\-./]+:latest/i.test(dockerfile);
+    const hasWeakTag = /FROM\s+[\w\-./]+:(?![0-9])/i.test(dockerfile); 
+    const hasNoTag = /FROM\s+[\w\-./]+[\s\n]/i.test(dockerfile) && !dockerfile.includes(':');
+
+    if (hasLatest || hasWeakTag || hasNoTag) {
+       addResult('INFRA', 'FAIL', 'Unpinned Docker image detected. Use specific versions (e.g., node:20.1-alpine).');
+    } else {
+       addResult('INFRA', 'PASS', 'Docker images appear pinned.');
+    }
   } else {
-     addResult('INFRA', 'PASS', 'Docker image versions appear pinned.');
+      // Opcional: Si quieres fallar si no hay Dockerfile, cambia esto. Por ahora SKIP silencioso es mejor para adopción.
   }
-} catch (e) {
-  // Si no hay Dockerfile, lo ignoramos o lo marcamos como skip
-}
+} catch (e) {}
+
 
 // --- FINAL REPORT & TELEMETRY ---
 const [s, ns] = process.hrtime(startTime);
@@ -104,29 +162,41 @@ const violations = auditResults.filter(r => r.status === 'FAIL' || r.status === 
 const isFailure = violations > 0;
 
 // 2. DISPARAR TELEMETRÍA (Fire & Forget)
-const brokenRuleIds = auditResults.filter(r => r.status !== 'PASS').map(r => r.id);
-trackAudit(isFailure ? 'FAIL' : 'PASS', brokenRuleIds);
+// Safe wrapper en caso de que utils/telemetry falle
+try {
+    const brokenRuleIds = auditResults.filter(r => r.status !== 'PASS').map(r => r.id);
+    trackAudit(isFailure ? 'FAIL' : 'PASS', brokenRuleIds);
+} catch (e) {
+    // Telemetría no debe romper el CLI
+}
 
-// 3. WRAPPER CON TIMEOUT (Para dar tiempo al request de salir)
+// 3. WRAPPER CON TIMEOUT
 setTimeout(() => {
+  // Manejo de versión robusto
+  let pkgVersion = "unknown";
+  try { pkgVersion = require('./package.json').version; } catch(e) {}
+
   if (isJson) {
     process.stdout.write(JSON.stringify({
-      version: require('./package.json').version || "0.1.0",
+      version: pkgVersion,
       status: violations > 0 ? "FAILED" : "PASSED",
       metrics: { violations, rules_evaluated: auditResults.length, duration_ms: durationMs },
       results: auditResults
     }, null, 2) + '\n');
-    process.exit(violations > 0 ? 1 : 0); // Importante: Salir con 1 en JSON también si falla
+    process.exit(violations > 0 ? 1 : 0);
   } else {
     console.log(chalk.blue('\n🔍 StrictKit Audit Report'));
     console.log(chalk.gray('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'));
+    
     auditResults.forEach(res => {
-      const color = res.status === 'PASS' ? chalk.green : (res.status === 'WARN' ? chalk.yellow : chalk.red);
+      let color = chalk.green;
+      if (res.status === 'WARN') color = chalk.yellow;
+      if (res.status === 'FAIL') color = chalk.red;
+      
       console.log(`${color(res.status.padEnd(5))} [${res.id}] ${res.rule.padEnd(10)}: ${res.message}`);
     });
+
     console.log(chalk.gray('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-    
-    // Aviso de Ética
     console.log(chalk.gray(`\nℹ  Anonymous usage metrics collected. Set STRICTKIT_TELEMETRY=off to disable.`));
 
     if (violations > 0) {
@@ -137,4 +207,4 @@ setTimeout(() => {
       process.exit(0);
     }
   }
-}, 500); // 500ms delay imperceptible
+}, 500);
