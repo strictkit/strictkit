@@ -6,7 +6,8 @@
     "strictkit": "index.js"
   },
   "files": [
-    "index.js"
+    "index.js",
+    "utils"
   ],
   "scripts": {
     "test": "node index.js .",
