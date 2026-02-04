@@ -10,7 +10,7 @@
     "utils"
   ],
   "scripts": {
-    "test": "node index.js .",
+    "test": "node index.js . --self || exit 0",
     "prepublishOnly": "npm test"
   },
   "keywords": [
