@@ -112,7 +112,8 @@ const SECRET_PATTERNS = [
   /AIza[a-zA-Z0-9\-_]{35}/,         // Google API
   /sk-proj-[a-zA-Z0-9]{48}/,        // OpenAI Project
   /sk-[a-zA-Z0-9]{48}/,             // OpenAI Legacy
-  /eyJ[a-zA-Z0-9_-]{20,}\.eyJ/      // JWT / Supabase potential leaks
+  /eyJ[a-zA-Z0-9_-]{20,}\.eyJ/,     // JWT / Supabase potential leaks
+  /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/ // Private Keys (SSH/Deploy)
 ];
 
 let secretFiles = [];
@@ -139,18 +140,16 @@ try {
   if (fs.existsSync(dockerPath)) {
     const dockerfile = fs.readFileSync(dockerPath, 'utf8');
     
-    // Busca FROM imagen:latest O FROM imagen (sin tag) O FROM imagen:tag_sin_numero
     const hasLatest = /FROM\s+[\w\-./]+:latest/i.test(dockerfile);
     const hasWeakTag = /FROM\s+[\w\-./]+:(?![0-9])/i.test(dockerfile); 
+    const hasAlpineOnly = /FROM\s+[\w\-./]+:alpine\b/i.test(dockerfile); // 🏔️ Alpine sin versión
     const hasNoTag = /FROM\s+[\w\-./]+[\s\n]/i.test(dockerfile) && !dockerfile.includes(':');
 
-    if (hasLatest || hasWeakTag || hasNoTag) {
+    if (hasLatest || hasWeakTag || hasNoTag || hasAlpineOnly) {
        addResult('INFRA', 'FAIL', 'Unpinned Docker image detected. Use specific versions (e.g., node:20.1-alpine).');
     } else {
        addResult('INFRA', 'PASS', 'Docker images appear pinned.');
     }
-  } else {
-      // Opcional: Si quieres fallar si no hay Dockerfile, cambia esto. Por ahora SKIP silencioso es mejor para adopción.
   }
 } catch (e) {}
 
