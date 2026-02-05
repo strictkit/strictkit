@@ -3,7 +3,7 @@ const chalk = require('chalk');
 const { globSync } = require('glob');
 const fs = require('fs');
 const path = require('path');
-const { trackAudit } = require('./telemetry'); // 👈 Importación vital para tu Lead Scoring
+const { trackAudit } = require('./utils/telemetry');
 
 // CONFIG - Parse arguments correctly
 const args = process.argv.slice(2);
