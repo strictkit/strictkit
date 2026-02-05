@@ -10,7 +10,7 @@ const COMMANDS = ['audit', 'explain', 'help', '--help', '-h', '--version', '-v']
 const command = args.find(a => COMMANDS.includes(a)) || 'audit';
 const PROJECT_PATH = args.find(a => !COMMANDS.includes(a) && !a.startsWith('-')) || '.';
 const CURRENT_FILE = path.basename(__filename);
-const IGNORE_PATTERNS = ['node_modules/**', 'dist/**', '.next/**', 'coverage/**', '.git/**', '*.min.js', CURRENT_FILE];
+const IGNORE_PATTERNS = ['node_modules/**', 'dist/**', '.next/**', 'coverage/**', '.git/**', '*.min.js', 'utils/**', CURRENT_FILE];
 
 // Handle help/version
 if (['help', '--help', '-h'].includes(command)) {
