@@ -4,12 +4,48 @@ const { globSync } = require('glob');
 const fs = require('fs');
 const path = require('path');
 
-// CONFIG
-const PROJECT_PATH = process.argv[2] || '.';
+// CONFIG - Parse arguments correctly
+const args = process.argv.slice(2);
+const COMMANDS = ['audit', 'explain', 'help', '--help', '-h', '--version', '-v'];
+const command = args.find(a => COMMANDS.includes(a)) || 'audit';
+const PROJECT_PATH = args.find(a => !COMMANDS.includes(a) && !a.startsWith('-')) || '.';
 const IGNORE_PATTERNS = ['node_modules/**', 'dist/**', '.next/**', 'coverage/**', '.git/**', '*.min.js'];
 
+// Handle help/version
+if (['help', '--help', '-h'].includes(command)) {
+  console.log(`
+${chalk.bold('StrictKit')} - The Code Integrity Protocol
+
+${chalk.yellow('Usage:')}
+  npx strictkit [command] [path]
+
+${chalk.yellow('Commands:')}
+  audit [path]    Audit a project (default: current directory)
+  help            Show this help message
+
+${chalk.yellow('Examples:')}
+  npx strictkit                  # Audit current directory
+  npx strictkit audit            # Same as above
+  npx strictkit ./my-project     # Audit specific directory
+  npx strictkit audit ../app     # Audit with explicit command
+
+${chalk.yellow('More info:')} https://strictkit.dev
+`);
+  process.exit(0);
+}
+
+if (['--version', '-v'].includes(command)) {
+  try {
+    const pkg = require('./package.json');
+    console.log(pkg.version);
+  } catch {
+    console.log('unknown');
+  }
+  process.exit(0);
+}
+
 console.log(chalk.bold.white('\n🔒 STRICTKIT: The Code Integrity Protocol'));
-console.log(chalk.gray('   Auditing architecture adherence...\n'));
+console.log(chalk.gray(`   Auditing: ${path.resolve(PROJECT_PATH)}\n`));
 
 const results = [];
 
