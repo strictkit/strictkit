@@ -75,12 +75,12 @@ try {
     let clean = stripComments(content);
     clean = stripStrings(clean);
     
-    // 🛡️ Regex corregidos con \b para evitar falsos positivos
+    // 🛡️ Regex corregidos con \b
     const patterns = [
       /:\s*any\b/g,      // : any
       /\bas\s+any\b/g,   // as any
-      /\bany\[\]/g,      // any[] (Ya no matchea Company[])
-      /<any\b>/g,        // <any> (Ya no matchea <Company>)
+      /\bany\[\]/g,      // any[]
+      /<any\b>/g,        // <any>
     ];
     
     let fileCount = 0;
@@ -104,7 +104,7 @@ try {
   }
 } catch (e) { audit('NO_ANY', 'WARN', 'Could not complete TypeScript scan.'); }
 
-// --- GATE 2: SECRET SENTINEL (Sin cambios, ya es sólido) ---
+// --- GATE 2: SECRET SENTINEL ---
 const SECRET_PATTERNS = [
   /sk_live_[a-zA-Z0-9]{24,}/, /sk_test_[a-zA-Z0-9]{24,}/, /AKIA[0-9A-Z]{16}/,
   /ghp_[a-zA-Z0-9]{36}/, /gho_[a-zA-Z0-9]{36}/, /xox[baprs]-[0-9a-zA-Z-]{10,}/,
@@ -144,21 +144,35 @@ try {
   } else { audit('DOCKER', 'WARN', 'No Dockerfile found.'); }
 } catch (e) { audit('DOCKER', 'WARN', 'Scan failed.'); }
 
-// --- GATE 4: CONSOLE SILENCE ---
+// --- GATE 4: CONSOLE SILENCE (Updated) ---
 try {
   const jsFiles = globSync('**/*.{ts,tsx,js,jsx}', { 
     cwd: PROJECT_PATH, 
     ignore: [...IGNORE_PATTERNS, '**/*.test.*', '**/*.spec.*', '**/test/**', '**/__tests__/**']
   });
+  
   let logCount = 0;
+  let logFiles = []; // 👈 Trackeamos archivos
+
   jsFiles.forEach(f => {
     const content = fs.readFileSync(path.join(PROJECT_PATH, f), 'utf8');
     let clean = stripStrings(stripComments(content));
-    const matches = clean.match(/console\.log\s*\(/g);
-    if (matches) logCount += matches.length;
+    
+    // 🛡️ Regex con \b para evitar 'myconsole.log'
+    const matches = clean.match(/\bconsole\.log\s*\(/g);
+    
+    if (matches) {
+      logCount += matches.length;
+      logFiles.push(f);
+    }
   });
-  if (logCount > 0) audit('CONSOLE', 'FAIL', `Found ${logCount} console.log().`);
-  else audit('CONSOLE', 'PASS', 'No console pollution.');
+
+  if (logCount > 0) {
+    // Reportamos cantidad de archivos también
+    audit('CONSOLE', 'FAIL', `Found ${logCount} console.log() in ${logFiles.length} file(s).`);
+  } else {
+    audit('CONSOLE', 'PASS', 'No console pollution detected.');
+  }
 } catch (e) { audit('CONSOLE', 'WARN', 'Scan failed.'); }
 
 // --- GATE 5: DEPENDENCY FREEZE ---
@@ -173,14 +187,13 @@ try {
 const failed = results.filter(r => r.status === 'FAIL').length;
 const brokenRuleIds = results.filter(r => r.status === 'FAIL').map(r => r.gate);
 
-// 📡 Enviamos los datos a Supabase antes de cerrar
 trackAudit(failed > 0 ? 'failed' : 'passed', brokenRuleIds);
 
 console.log(chalk.gray('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
 if (failed > 0) {
   console.log(chalk.red.bold(`\n💥 AUDIT FAILED`));
   console.log(chalk.cyan.bold(`\n→ https://www.strictkit.dev/pro?src=cli&f=${failed}\n`));
-  setTimeout(() => process.exit(1), 300); // 👈 Delay para asegurar el envío HTTP
+  setTimeout(() => process.exit(1), 300);
 } else {
   console.log(chalk.green.bold(`\n✨ AUDIT PASSED`));
   console.log(chalk.cyan.bold('\n→ https://www.strictkit.dev/pro?src=cli&f=0\n'));
