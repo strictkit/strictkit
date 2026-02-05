@@ -9,7 +9,8 @@ const args = process.argv.slice(2);
 const COMMANDS = ['audit', 'explain', 'help', '--help', '-h', '--version', '-v'];
 const command = args.find(a => COMMANDS.includes(a)) || 'audit';
 const PROJECT_PATH = args.find(a => !COMMANDS.includes(a) && !a.startsWith('-')) || '.';
-const IGNORE_PATTERNS = ['node_modules/**', 'dist/**', '.next/**', 'coverage/**', '.git/**', '*.min.js'];
+const CURRENT_FILE = path.basename(__filename);
+const IGNORE_PATTERNS = ['node_modules/**', 'dist/**', '.next/**', 'coverage/**', '.git/**', '*.min.js', CURRENT_FILE];
 
 // Handle help/version
 if (['help', '--help', '-h'].includes(command)) {
