@@ -1,6 +1,6 @@
 {
   "name": "strictkit",
-  "version": "0.1.15",
+  "version": "0.2.0",
   "description": "The Security & Architecture Baseline for Next.js",
   "bin": {
     "strictkit": "index.js"
