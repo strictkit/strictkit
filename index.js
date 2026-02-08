@@ -13,17 +13,23 @@ const PROJECT_PATH = args.find(a => !COMMANDS.includes(a) && !a.startsWith('-'))
 const CURRENT_FILE = path.basename(__filename);
 const IGNORE_PATTERNS = ['node_modules/**', 'dist/**', '.next/**', 'coverage/**', '.git/**', '*.min.js', 'utils/**', CURRENT_FILE];
 
-// --- HELP & VERSION ---
+// 🚩 DETECT JSON FLAG
+const isJson = args.includes('--json');
+
+// --- HELP & VERSION (Keep these human-only usually) ---
 if (['help', '--help', '-h'].includes(command)) {
   console.log(`
 ${chalk.bold('StrictKit')} - The Code Integrity Protocol
 
 ${chalk.yellow('Usage:')}
-  npx strictkit [command] [path]
+  npx strictkit [command] [path] [--json]
 
 ${chalk.yellow('Commands:')}
   audit [path]    Audit a project (default: current directory)
   help            Show this help message
+
+${chalk.yellow('Options:')}
+  --json          Output results in JSON format (for CI/CD)
 
 ${chalk.yellow('More info:')} https://www.strictkit.dev
 `);
@@ -38,16 +44,51 @@ if (['--version', '-v'].includes(command)) {
   process.exit(0);
 }
 
-console.log(chalk.bold.white('\n🔒 STRICTKIT: The Code Integrity Protocol'));
-console.log(chalk.gray(`   Auditing: ${path.resolve(PROJECT_PATH)}\n`));
+// 🤫 SILENCE LOGS IF JSON
+function logHuman(msg) {
+  if (!isJson) console.log(msg);
+}
 
-const results = [];
+logHuman(chalk.bold.white('\n🔒 STRICTKIT: The Code Integrity Protocol'));
+logHuman(chalk.gray(`   Auditing: ${path.resolve(PROJECT_PATH)}\n`));
 
+// 📦 DATA STRUCTURE FOR JSON
+const jsonReport = {
+  meta: {
+    tool: 'StrictKit',
+    timestamp: new Date().toISOString(),
+    path: path.resolve(PROJECT_PATH)
+  },
+  summary: {
+    total: 0,
+    passed: 0,
+    failed: 0,
+    warnings: 0
+  },
+  results: []
+};
+
+// --- AUDIT FUNCTION (Dual Mode) ---
 function audit(gate, status, msg) {
-  results.push({ gate, status, msg });
-  const icon = status === 'FAIL' ? '❌' : (status === 'WARN' ? '⚠️ ' : '✅');
-  const color = status === 'FAIL' ? chalk.red : (status === 'WARN' ? chalk.yellow : chalk.green);
-  console.log(`${icon} ${chalk.bold(gate.padEnd(15))} ${color(msg)}`);
+  // 1. Add to JSON Report
+  jsonReport.results.push({
+    gate,
+    status, // FAIL, PASS, WARN
+    message: msg
+  });
+  
+  // Update summary
+  jsonReport.summary.total++;
+  if (status === 'FAIL') jsonReport.summary.failed++;
+  else if (status === 'PASS') jsonReport.summary.passed++;
+  else jsonReport.summary.warnings++;
+
+  // 2. Print Human Output (if not json)
+  if (!isJson) {
+    const icon = status === 'FAIL' ? '❌' : (status === 'WARN' ? '⚠️ ' : '✅');
+    const color = status === 'FAIL' ? chalk.red : (status === 'WARN' ? chalk.yellow : chalk.green);
+    console.log(`${icon} ${chalk.bold(gate.padEnd(15))} ${color(msg)}`);
+  }
 }
 
 // --- UTILS ---
@@ -75,7 +116,6 @@ try {
     let clean = stripComments(content);
     clean = stripStrings(clean);
     
-    // 🛡️ Regex corregidos con \b
     const patterns = [
       /:\s*any\b/g,      // : any
       /\bas\s+any\b/g,   // as any
@@ -144,7 +184,7 @@ try {
   } else { audit('DOCKER', 'WARN', 'No Dockerfile found.'); }
 } catch (e) { audit('DOCKER', 'WARN', 'Scan failed.'); }
 
-// --- GATE 4: CONSOLE SILENCE (Updated) ---
+// --- GATE 4: CONSOLE SILENCE ---
 try {
   const jsFiles = globSync('**/*.{ts,tsx,js,jsx}', { 
     cwd: PROJECT_PATH, 
@@ -152,13 +192,11 @@ try {
   });
   
   let logCount = 0;
-  let logFiles = []; // 👈 Trackeamos archivos
+  let logFiles = []; 
 
   jsFiles.forEach(f => {
     const content = fs.readFileSync(path.join(PROJECT_PATH, f), 'utf8');
     let clean = stripStrings(stripComments(content));
-    
-    // 🛡️ Regex con \b para evitar 'myconsole.log'
     const matches = clean.match(/\bconsole\.log\s*\(/g);
     
     if (matches) {
@@ -168,7 +206,6 @@ try {
   });
 
   if (logCount > 0) {
-    // Reportamos cantidad de archivos también
     audit('CONSOLE', 'FAIL', `Found ${logCount} console.log() in ${logFiles.length} file(s).`);
   } else {
     audit('CONSOLE', 'PASS', 'No console pollution detected.');
@@ -184,18 +221,28 @@ try {
 } catch (e) { audit('LOCKFILE', 'WARN', 'Scan failed.'); }
 
 // --- VERDICT & TELEMETRY ---
-const failed = results.filter(r => r.status === 'FAIL').length;
-const brokenRuleIds = results.filter(r => r.status === 'FAIL').map(r => r.gate);
+const failed = jsonReport.summary.failed;
+const brokenRuleIds = jsonReport.results.filter(r => r.status === 'FAIL').map(r => r.gate);
 
 trackAudit(failed > 0 ? 'failed' : 'passed', brokenRuleIds);
 
-console.log(chalk.gray('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
-if (failed > 0) {
-  console.log(chalk.red.bold(`\n💥 AUDIT FAILED`));
-  console.log(chalk.cyan.bold(`\n→ https://www.strictkit.dev/pro?src=cli&f=${failed}\n`));
-  setTimeout(() => process.exit(1), 300);
+// --- FINAL OUTPUT ---
+
+if (isJson) {
+  // 🤖 MACHINE OUTPUT (Pure JSON)
+  jsonReport.success = failed === 0;
+  console.log(JSON.stringify(jsonReport, null, 2));
+  process.exit(failed > 0 ? 1 : 0);
 } else {
-  console.log(chalk.green.bold(`\n✨ AUDIT PASSED`));
-  console.log(chalk.cyan.bold('\n→ https://www.strictkit.dev/pro?src=cli&f=0\n'));
-  setTimeout(() => process.exit(0), 300);
+  // 👨‍💻 HUMAN OUTPUT (Fancy UI)
+  logHuman(chalk.gray('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+  if (failed > 0) {
+    logHuman(chalk.red.bold(`\n💥 AUDIT FAILED`));
+    logHuman(chalk.cyan.bold(`\n→ https://www.strictkit.dev/pro?src=cli&f=${failed}\n`));
+    setTimeout(() => process.exit(1), 300);
+  } else {
+    logHuman(chalk.green.bold(`\n✨ AUDIT PASSED`));
+    logHuman(chalk.cyan.bold('\n→ https://www.strictkit.dev/pro?src=cli&f=0\n'));
+    setTimeout(() => process.exit(0), 300);
+  }
 }
