@@ -10,8 +10,9 @@
     "utils"
   ],
   "scripts": {
-    "test": "node index.js . --self || exit 0",
-    "prepublishOnly": "npm test"
+    "test": "node --test __tests__/utils.test.js __tests__/gates.test.js",
+    "test:self": "node index.js . --json",
+    "prepublishOnly": "npm test && npm run test:self"
   },
   "keywords": [
     "nextjs",
@@ -36,6 +37,7 @@
   },
   "dependencies": {
     "chalk": "^4.1.2",
-    "glob": "^13.0.1"
+    "glob": "^13.0.1",
+    "typescript": "^5.9.3"
   }
 }

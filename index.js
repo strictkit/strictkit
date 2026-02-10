@@ -92,43 +92,19 @@ function audit(gate, status, msg) {
 }
 
 // --- UTILS ---
-function stripComments(code) {
-  code = code.replace(/\/\*[\s\S]*?\*\//g, '');
-  code = code.replace(/(?<!:)\/\/.*$/gm, '');
-  return code;
-}
+const { stripComments, stripStrings } = require('./utils/sanitize');
 
-function stripStrings(code) {
-  code = code.replace(/`[^`]*`/g, '""');
-  code = code.replace(/"(?:[^"\\]|\\.)*"/g, '""');
-  code = code.replace(/'(?:[^'\\]|\\.)*'/g, "''");
-  return code;
-}
-
-// --- GATE 1: THE NO-ANY POLICY (Hardened) ---
+// --- GATE 1: THE NO-ANY POLICY (AST-powered) ---
 try {
+  const { countAnyTypes } = require('./utils/ast-analyzer');
   const tsFiles = globSync('**/*.{ts,tsx}', { cwd: PROJECT_PATH, ignore: IGNORE_PATTERNS });
   let anyCount = 0;
   let anyFiles = [];
-  
+
   tsFiles.forEach(f => {
     const content = fs.readFileSync(path.join(PROJECT_PATH, f), 'utf8');
-    let clean = stripComments(content);
-    clean = stripStrings(clean);
-    
-    const patterns = [
-      /:\s*any\b/g,      // : any
-      /\bas\s+any\b/g,   // as any
-      /\bany\[\]/g,      // any[]
-      /<any\b>/g,        // <any>
-    ];
-    
-    let fileCount = 0;
-    patterns.forEach(p => {
-      const matches = clean.match(p);
-      if (matches) fileCount += matches.length;
-    });
-    
+    const fileCount = countAnyTypes(f, content);
+
     if (fileCount > 0) {
       anyCount += fileCount;
       anyFiles.push(f);
